@@ -1,6 +1,6 @@
 ---
-title: "Group2- Step 1"
-author: "Mahmut Guven Alaca - 041903017, Emre Aksoy - 041903026"
+title: "CalCofiEDA"
+author: "Mahmut Guven Alaca"
 date: "2023-12-05"
 output: html_document
 ---
