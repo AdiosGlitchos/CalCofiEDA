@@ -1,0 +1,514 @@
+---
+title: "Group2- Step 1"
+author: "Mahmut Guven Alaca - 041903017, Emre Aksoy - 041903026"
+date: "2023-12-05"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(SmartEDA)
+library(rmarkdown)
+knitr::opts_chunk$set(warning = FALSE, message = FALSE) 
+theme_set(theme_bw())
+library(knitr)
+library(corrplot)
+```
+
+
+# Reading Datasets
+
+We have two dataset for Bottle Database in [CalCOFI](https://calcofi.org/data/oceanographic-data/bottle-database/)
+```{r}
+bottle <-read.csv('194903-202105_Bottle.csv')
+cast <- read.csv('194903-202105_Cast.csv')
+getwd()
+```
+- The *Cast table* stores metadata from CalCOFI cruises, detailing CTD cast information such as date, time, latitude, longitude, and weather. Each row is uniquely identified by the **"Cst_Cnt"** column.
+
+# Cast Table
+```{r,echo=FALSE}
+paged_table(cast)
+```
+- The *Bottle table* logs oceanographic measurements during CalCOFI cruises, indexing each bottle by **"Btl_Cnt"** and including data quality indicators like data code and precision columns.
+
+# Bottle Table
+```{r,echo=FALSE}
+paged_table(bottle)
+```
+
+In each dipping process, the bottles go deeper step by step, and after reaching a certain point, another dipping process is started, which starts to go down from 0 meters to the depths, step by step, and this repeats.
+
+# Summary Statistics
+```{r}
+summary(bottle)
+```
+
+**qual, qua, or q (Quality Code - found in Bottle table; associated with discrete samples; examples: "O_qual", "Chlqua", "PO4q"):**
+
+- Blank Data OK
+- "4" Value zeroed due to value below detection limit
+- "6" Data taken from CTD sensor
+- "8" Technician thinks value is suspect
+- "9" Missing Data
+
+We can not do *na.omit* because NA's are **valuable data !**
+```{r}
+bottle$O_qual.f<-factor(bottle$O_qual)
+summary(bottle$O_qual.f)
+```
+
+As we can see there is 169741 missing data and 1455 technician thinks value is suspect rows for O_qual
+
+```{r}
+qualityCode<-select(bottle,ends_with(c('q','qua','_qual')))
+
+summary(qualityCode)
+```
+
+From here S_qual has max *323*, so we can not say every column that has qual, qua, or q is categorical variable. Table needed to inspected carefully to convert categorical variables into factor.
+
+
+
+**RecInd (Record Indicator - found in Bottle table):**
+
+- "3"  Observed Data
+- "4"  Educated office guess (ghost)
+- "5"  Data from STD or CTD sensor
+- "6"  Duplicate Depth
+- "7"  Interpolated to a standard depth
+
+**Interpolated:** It is the general name given to all the methods used to find/estimate the possible value at a point whose value is unknown.
+
+```{r}
+bottle$RecInd.f<-factor(bottle$RecInd)
+summary(bottle$RecInd.f)
+```
+So we can say 335003 data is interpolated in this dataset and there is 474987 observed data
+
+
+Predicted values are being removed from the dataset. We plan to focus on measured values rather than estimated values during analysis.
+
+```{r}
+bottle<-filter(bottle,RecInd!=7)
+```
+
+Also wanted to remove duplicates from both cast and bottle table. "unique.data.frame" function basically removing duplicate rows from the table if exist.
+
+```{r}
+bottle<-unique.data.frame(bottle)
+cast<-unique.data.frame(cast)
+```
+
+
+
+# One Variable Analysis
+Wanted to count how many observations ships have had by descending arrange
+```{r}
+orderingShipCounts <- cast %>%
+  group_by(Ship_Name) %>%
+  summarise(count = n()) %>%
+  arrange(desc(count))
+```
+
+Getting top 10 ship in *figure 1*, from this graph RV David Starr Jordan is the most ship used for observations
+
+```{r,fig.cap= 'Figure 1:Top 10 ship names used for measurement'}
+top10Data <- head(orderingShipCounts, 10)
+ggplot(top10Data, aes(x = reorder(Ship_Name, -count), y = count)) +
+  geom_bar(stat = "identity",fill="Orange") +
+  labs(title = "Top 10 Ship Names",x = "Ship Name",y = "Count")+
+  theme(axis.text.x = element_text(angle = 50, hjust = 1)) # To make labels with 50 degree we use this and for labels next to X line adding hjust=1
+```
+
+Well, we can draw a histogram to find out in which year the most measurements were made. In this way, we can see in which year the most measurements were made.
+
+```{r, fig.cap='Figure 2: Measurement counts by year'}
+ggplot(cast,aes(Year))+
+  geom_histogram(binwidth = 5,color='red',fill='orange')
+```
+From *figure 2* we obtain a decreasing number of measurements since 1950. While there were over 4000 measurements in the first years, this number decreased to around 1500 measurements in the 2000s.
+
+
+We can draw a bar chart to see the data types better. In this way, we can more easily observe which data type is available and how much.
+
+**Data_Type (Data Type - found in Cast table)**
+
+- "PR" - Productivity Cast
+- "HY" - Hydrographic Cast
+- "10" - Ten-meter Cast
+- "CT" - Compressed CTD Cast (Low Resolution)
+- "MX" - Mixed CTD and Bottle Data
+
+```{r fig.cap= 'Figure 3: Data type counts'}
+cast$Data_Type.f<-factor(cast$Data_Type)
+
+ggplot(cast,aes(Data_Type.f))+
+  geom_bar(fill='orange')+
+  labs(x="Data Type", y="Count")
+```
+
+We can observe from *figure 3* that hydrographic data type is the most common. We see that there is at least 10 meters of cast. We can see that there is also a lot of low resolution data here.
+
+
+Also wanted to check station codes in bar graph to observe which station measured most.
+
+**Sta_Code (Station Codes - found in Cast table)**
+
+- "ST" - Standard CalCOFI Station
+- "SCO" - SCCOOS nearshore/20m Station
+- "NRO" - Not Regularly Occupied Original CalCOFI Station
+- "OCO" - Occasionally CalCOFI Occupied
+- "IMX" - IMECOCAL Occupied
+- "NST" - Non-Standard Station
+- "MBR" - MBARI Occupied Station
+
+
+```{r fig.cap= 'Figure 4: Data type counts'}
+cast$Sta_Code.f<-factor(cast$Sta_Code)
+
+ggplot(cast,aes(Sta_Code.f))+
+  geom_bar(fill='orange')+
+  labs(x="Stations", y="Count")
+```
+
+As we can see from *figure 4*, the most data is from the CalCofi station. However, not only calcofi station but also IMECOCAL station is in the dataset.
+
+
+We can use a contingency table to find out how comprehensively the stations can search. The cast table contains the codes of the stations and the types of data. From here, we can learn which station extracted how much data and which data types were measured the most.
+
+```{r, fig.cap='Figure 5: Contingency table for station codes and data type'}
+contTable= prop.table(table(cast$Sta_Code,cast$Data_Type))*100
+contTable
+```
+
+From *figure 5*, we see that the most hydrographic data is provided by standard CalCOFI station, followed by "IMECOCAL" and "Non-Standard" stations with the most hydrographic data. The standard CalCOFI station ranks first in every data type. 10 meter cast is not very common in our dataset. "Mixed CTD and Bottle Data" type is provided only and largely from Standard CalCOFI Station. "MBARI" stations do not contribute much to this dataset.
+
+Low resolution data types can be removed from the data set because they may provide incorrect information.
+
+# Two Variable Analysis
+
+
+## Do depth effects salinity?
+
+```{r}
+model<- lm(Salnty~Depthm,bottle)
+
+summary(model)
+```
+
+Adjusted R square is about 0.2597 which is not very accurate
+
+Maybe temperature and depth effects salinity 
+
+```{r}
+model2<-lm(Salnty~Depthm+T_degC,bottle)
+
+summary(model2)
+```
+
+Adjusted R square increased into 0.2734. Formula for salinity is salinity=3.395e+01+6.488e-04xdepth-2.416e-02xtemperature in this linear modal.
+
+
+```{r fig.cap= 'Figure 6: Scatter plot for depth and salinity'}
+ggplot(bottle,aes(Depthm,Salnty))+
+  geom_point(alpha=0.2)
+```
+
+From *figure 6* as the depth increases, the salinity rate becomes more stable and remains constant. When we reach 4000 meters, the salinity remains constant, but at 0 meters, the salinity is quite variable. From this we can understand that salinity stabilizes as we deepen. At the same time, the cluster at the bottom of the chart may be showing us the outliers. It is useful to draw a boxplot for this, so we can visually see the outliers.
+
+```{r fig.cap= 'Figure 7: Box plot for salinity'}
+ggplot(bottle,aes(y=Salnty))+
+  geom_boxplot()
+```
+
+In *figure 7* can be seen, there are too many outliers. The IQR method will be applied to remove these outliers and the graph will be printed again, so we hope that the underlying cluster will disappear and provide us with a more accurate graph.
+
+```{r}
+q1 <- quantile(bottle$Salnty, 0.25,na.rm=TRUE)
+q3 <- quantile(bottle$Salnty, 0.75,na.rm=TRUE)
+
+IQR<-IQR(bottle$Salnty,na.rm=TRUE)
+
+lower_bound <- q1 - 1.5 * IQR
+upper_bound <- q3 + 1.5 * IQR
+
+bottle<-filter(bottle, Salnty>=lower_bound&Salnty<=upper_bound)
+```
+After clearing the outlines, 27289 rows are deleted from our data set. That means there were 27289 outliers.
+
+```{r fig.cap= 'Figure 8: Scatter plot for depth and salinity'}
+ggplot(bottle,aes(Depthm,Salnty))+
+  geom_point(alpha=0.2)
+```
+
+When we plot the graph again ( *figure 8* ), we realize that the cluster at the bottom has disappeared, giving us a more accurate graph. At the same time, we observe here again the stabilization of salinity as we get deeper, which we mentioned at first.
+
+```{r}
+summary(lm(Salnty~Depthm,bottle))
+```
+
+Also adjusted R squared has increased, **bottle** will be used in the rest of the analysis.
+
+
+We wanted to check salinity vs depth graph for each ship. To do this analysis we need to merge two table, Sta_ID is the common key for these two table so we can merge bottle and cast table together by Sta_ID
+
+```{r}
+cast_aggregated <- cast %>%
+  group_by(Sta_ID) %>%
+  summarize(Ship_Name = first(Ship_Name))
+```
+
+First grouping Ship_Names by Sta_ID, so when R checking Sta_ID will be represent for ship name
+
+```{r}
+merged_table <- left_join(bottle, cast_aggregated, by = 'Sta_ID')
+```
+
+Then merging this two table by Sta_ID, only Ship_Name is added into end of the bottle table
+
+```{r fig.cap= 'Figure 9: Scatter plot for depth and salinity seperated by ship names'}
+ggplot(bottle,aes(Depthm,Salnty))+
+  geom_point()+
+  facet_wrap(~merged_table$Ship_Name)
+```
+
+Using facet wrap to check salinity vs depth graph seperately by ship names
+From *figure 9* we can say **Ekvator, Ellen B. Scripps, Westwind and Yellowfin** these ships did not dip the bottles any deeper during the measurement. Deepest measurement has done by **RV Alexander Agassiz** and **Horizon**
+
+
+## Do depth effects temperature?
+```{r fig.cap= 'Figure 10: Scatter plot for depth and temperature'}
+ggplot(bottle,aes(Depthm,T_degC))+
+  geom_point()
+```
+
+When we examine the graph of temperature and depth in *figure 10*, we observe that as we go deeper, the temperature approaches zero and decreases exponentially.
+
+In the graph, we see an additional bulge in this exponential decrease. We plot an additional graph to observe which ships are responsible for this protrusion.
+
+```{r fig.cap= 'Figure 11: Scatter plot for depth and temperature by ship names'}
+ggplot(bottle,aes(Depthm,T_degC))+
+  geom_point()+
+    facet_wrap(~merged_table$Ship_Name)
+```
+
+From *figure 11*, we observe that the ships **RV Alexander Agassiz, Black Douglas, Spencer F. Baird** and **Stranger** measured these salinity rates incorrectly.
+
+
+
+
+
+# Dependent Variable Explanation
+
+
+## Salinity
+
+We want to see how salinity relates to other things they measure. This is really important for studying the ocean. By saying that what we are trying to solve for is salinity as the dependent variable, we can see how different things in the environment change the salinity. We will see how and to what extent molecules affect salinity with the regression model.
+
+## Temperature
+
+To see whether molecules affect the temperature, we take the temperature as a dependent variable and consider the molecules as independent. As a result of this model, we aim to see which molecules affect the temperature and to what extent.
+
+## Wave Height
+
+We created a model to learn what determines wave heights. In addition to the wind effect, how often waves are formed per second, atmospheric pressure, their direction, etc. we took these as an independent variables first. As a result of this model, we will learn which variable affects how much wave height.
+
+## Correlation Analysis
+
+```{r fig.cap= 'Figure 12: Correlation Matrix'}
+
+correlationMatrix <- cor(bottle[,c("T_degC","Salnty","Depthm","Phaeop","PO4uM","SiO3uM","NO2uM","NO3uM","NH3uM","DarkAs")], use = "complete.obs")
+corrplot(correlationMatrix, method = "circle")
+
+cor.test(bottle$SiO3uM,bottle$PO4uM)
+cor.test(bottle$T_degC,bottle$PO4uM)
+
+```
+
+In *figure 12*, we can see the correlation between the variables. The darker the color, the more correlated the variables are. The lighter the color, the less correlated the variables are. The diagonal line shows the correlation of the variables with themselves. The correlation between the variables is not very high. The highest correlation is between SiO3uM and PO4uM. The correlation between these two variables is 0.954. Most negative correlation is PO4uM and T_degC got -0.904.
+
+
+# Modeling and Implementation 
+
+## Salinity
+
+```{r}
+SalDepth<-lm(Salnty~Depthm+ChlorA+Phaeop+PO4uM+SiO3uM+NO2uM+NO3uM+NH3uM+DarkAs,bottle)
+
+summary(SalDepth)
+```
+
+In first model, we used all variables to predict salinity. But our adjusted R-squared is pretty low so we decided to remove some variables and try again. When we check the significance codes of the variables we can see that NO2uM is not significant. So we decided to remove this variable and try again.
+
+```{r}
+SalDepth2<-lm(Salnty~Depthm+ChlorA+Phaeop+PO4uM+SiO3uM+NO3uM+NH3uM+DarkAs,bottle)
+
+summary(SalDepth2)
+
+```
+
+In second iteration, we removed NO2uM variable and our adjusted R-squared decreased little bit. But we can see that all variables are significant. Wanted R-squared value higher, so we decided to remove ChlorA variable and try again. The reason why ChlorA removed is that it has the highest p-value among the significant variables.
+
+```{r}
+SalDepth3<-lm(Salnty~Depthm+Phaeop+PO4uM+SiO3uM+NO3uM+NH3uM+DarkAs,bottle)
+
+summary(SalDepth3)
+```
+
+In third iteration, our adjusted R-squared decreased again. Need to remove another variable. We decided to remove Phaeop variable because it has the highest p-value among the significant variables. Removed DarkAs variable because it has the highest p-value among the significant variables.
+
+```{r}
+SalDepth4<-lm(Salnty~Depthm+Phaeop+PO4uM+SiO3uM+NO3uM+NH3uM,bottle)
+summary(SalDepth4)
+
+```
+
+In fourth iteration, our adjusted R-squared increased to 0.7252 which means our model explains 72.52% of the variance in our dependent variable. We can see that all variables are significant. After that plotting residuals vs fitted values to check if there is pattern.
+
+```{r fig.cap= 'Figure 13: Residuals vs Fitted values'}
+ggplot(SalDepth4, aes(x = .fitted, y = .resid)) +
+  geom_point() +
+  geom_hline(yintercept = 0, linetype = "dashed") +
+  labs(x = "Fitted values", y = "Residuals")
+```
+
+In *figure 13*, we can see that there is no pattern in residuals vs fitted values. So we can say that our model is good.
+
+As a result, increase of depth, PO4uM, SiO3uM, NO3uM and NH3uM causes increase of salinity. Increase of Phaeop causes decrease of salinity. Highest increase is caused by PO4uM. Highest decrease is caused by Phaeop.
+
+
+## Temperature
+
+```{r}
+TempModel<-lm(T_degC~Depthm+Salnty+O2ml_L+ChlorA+Phaeop+PO4uM+SiO3uM+NO2uM+NO3uM+NH3uM+DarkAs,bottle)
+summary(TempModel)
+```
+
+In first model, using all possible related variables to predict temperature. But our adjusted R-squared is pretty low so we decided to remove some variables and try again. When we check the significance codes of the variables we can see that SiO3uM is not significant. So we decided to remove this variable and try again.
+
+```{r}
+TempModel2<-lm(T_degC~Depthm+Salnty+O2ml_L+ChlorA+Phaeop+PO4uM+NO2uM+NO3uM+NH3uM+DarkAs,bottle)
+summary(TempModel2)
+
+```
+
+In second iteration, when we check the adjusted R-squared value, we can see our adjusted R-squared stay same. But we can see that ChlorA variable is not significant. So we decided to remove this variable and check model again.
+
+```{r}
+TempModel3<-lm(T_degC~Depthm+Salnty+O2ml_L+Phaeop+PO4uM+NO2uM+NO3uM+NH3uM+DarkAs,bottle)
+summary(TempModel3)
+```
+
+In third iteration R-squared value still same. But wanted to try remove DarkAs variable because in salinity model when we removed DarkAs our adjusted R-squared increased a lot. Also milligrams carbon per cubic meter of seawater might not be related to temperature. So we decided to remove this variable and check model again.
+
+```{r}
+TempModel4<-lm(T_degC~Depthm+Salnty+O2ml_L+Phaeop+PO4uM+NO2uM+NO3uM+NH3uM,bottle)
+summary(TempModel4)
+```
+
+After removing DarkAs variable, our adjusted R-squared increased to 0.9022. So our model pretty good. We can see that all variables are significant. After that plotting residuals vs fitted values to check if there is pattern.
+
+```{r fig.cap= 'Figure 14: Residuals vs Fitted values'}
+ggplot(TempModel4, aes(x = .fitted, y = .resid)) +
+  geom_point() +
+  geom_hline(yintercept = 0, linetype = "dashed") +
+  labs(x = "Fitted values", y = "Residuals")
+
+```
+
+In *figure 14*, we can see that there is no pattern in residuals vs fitted values. So we can say that our model is good.
+
+As a result, increase of depth, salinity, O2ml_L, Phaeop, PO4uM, NO2uM and NO3uM causes decrease of temperature. Increase of NH3uM causes increase of temperature. Highest decrease is caused by PO4uM. Highest increase is caused by salinity.
+
+
+
+## Wave Height
+
+Wea means 1 Digit Code from The World Meteorlogical Organization, Code source WMO 4501. 
+
+- 0	Clear(No cloud at any level)
+- 1	Partly cloudy(Scattered or broken)
+- 2	Continuous layer(s) of blowing snow
+- 3	Sandstorm, duststorm, or blowing snow
+- 4	Fog, thick dust or haze
+- 5	Drizzle
+- 6	Rain
+- 7	Snow, or rain and snow mixed
+- 8	Shower(s)
+- 9	Thunderstorm(s)
+
+
+```{r}
+
+# converting date as date format. %d/%m/%Y stays for day/month/year
+cast$date<-as.Date(cast$Date, format = "%d/%m/%Y")
+cast$Day <- as.numeric(format(cast$date, "%d"))
+cast$Month <- as.numeric(format(cast$date, "%m"))
+
+# Transforming Wea to factor
+cast$Wea<-factor(cast$Wea)
+```
+
+We can start writing our model. For this model we will use cast table.
+
+```{r}
+Wavemodel1<- lm(Wave_Ht~Wave_Prd+Wind_Spd+Dry_T+Wet_T+Barometer+Ac_Line+Ac_Sta+Secchi+Cloud_Amt+Wea+Day+Month+Year,cast)
+summary(Wavemodel1)
+```
+
+In first model, we observing that there is lots of non-significant variables. So we decided to remove one of them and try again. We decided to remove Cloud_Amt variable because it has the highest p-value among the significant variables.
+
+```{r}
+Wavemodel2<- lm(Wave_Ht~Wave_Prd+Wind_Spd+Dry_T+Wet_T+Barometer+Ac_Line+Ac_Sta+Secchi+Wea+Day+Month+Year,cast)
+summary(Wavemodel2)
+```
+
+Our adjusted R-squared value increased little bit. But we can see that there is still non-significant variables. Ac_Line has the highest p-value among the significant variables. So we decided to remove this variable and try again.
+
+```{r}
+Wavemodel3<- lm(Wave_Ht~Wave_Prd+Wind_Spd+Dry_T+Wet_T+Barometer+Ac_Sta+Secchi+Wea+Day+Month+Year,cast)
+summary(Wavemodel3)
+```
+
+In third iteration, adjusted R-squared stays same but some variables still needed to removed. Removing Wet_T and checking new model.
+
+```{r}
+Wavemodel4<- lm(Wave_Ht~Wave_Prd+Wind_Spd+Dry_T+Barometer+Ac_Sta+Secchi+Wea+Day+Month+Year,cast)
+summary(Wavemodel4)
+```
+
+Our adjusted R-squared value increasing little by little. Continueing to remove non-significant variables.
+
+```{r}
+Wavemodel5<- lm(Wave_Ht~Wave_Prd+Wind_Spd+Dry_T+Barometer+Ac_Sta+Secchi+Wea+Day+Year,cast)
+summary(Wavemodel5)
+```
+
+Removing Day variable and checking new model.
+
+```{r}
+Wavemodel6<- lm(Wave_Ht~Wave_Prd+Wind_Spd+Dry_T+Barometer+Ac_Sta+Secchi+Wea+Year,cast)
+summary(Wavemodel6)
+```
+
+So this iteration seems the best model. We can't remove wea because wea6 is very significant. Other variables are also significant. So we can say that our model is good. We can check residuals vs fitted values to check if there is pattern.
+
+```{r fig.cap= 'Figure 15: Residuals vs Fitted values'}
+
+ggplot(Wavemodel6, aes(x = .fitted, y = .resid)) +
+  geom_point() +
+  geom_hline(yintercept = 0, linetype = "dashed") +
+  labs(x = "Fitted values", y = "Residuals")
+```
+
+In *figure 15*, we can say that there is pattern pattern in residuals vs fitted values. So we can not say that our model is strong. But we wanted to check Q-Q residuals plot to check if residuals are normally distributed.
+
+```{r fig.cap= 'Figure 16: Q-Q residuals plot'}
+ggplot(Wavemodel6, aes(sample = .resid)) +
+  stat_qq() +
+  stat_qq_line()
+```
+
+In *figure 16*, we can see that residuals are normally distributed. Q-Q plot can be helpful in understanding how well the errors fit a normal distribution. The absence of a curved line could mean that the errors do not follow a normal distribution and that the model may make poor predictions.
